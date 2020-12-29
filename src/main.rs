@@ -1,6 +1,6 @@
 use ggez::{*, graphics, event, input::keyboard};
 use ggez::nalgebra as na;
-use std::{env, path};
+use std::{env, path, VecDeque};
 
 enum Direction {
     Left,
@@ -14,14 +14,61 @@ enum Speed {
     Coast
 }
 
+struct Segment {
+    pos: na::Point2<f32>,
+    angle: f32,
+    speed: f32
+}
+
+impl Segment {
+    fn new(pos: na::Point2<f32>, angle: f32, speed: f32) -> Segment {
+        pos: pos,
+        angle: angle,
+        speed: speed
+    }
+
+    fn move() -> &mut Self {
+        let velocity = na::Rotation2::new(self.angle)
+                     * na::Vector2::new(-1.0, 0.0) * self.speed;
+
+        self.pos += velocity;
+        self
+    }
+
+    fn wrap(min: na::Vector2<f32>, max: na::Vector2<f32>) -> &mut Self {
+        self.pos.x = ::wrap(self.pos.x, min.x, max.x);
+        self.pos.y = ::wrap(self.pos.y, min.y, max.y);
+        self
+    }
+
+    fn turn(direction: Direction) -> &mut Self {
+        match direction {
+            Direction::Left => self.angle -= 0.05,
+            Direction::Right => self.angle += 0.05,
+            _ => {},
+        }
+        self
+    }
+
+    fn accelerate(accel: Speed) -> &mut Self {
+        match accel {
+            Speed::Accelerate => self.speed += 0.1,
+            Speed::Brake => self.speed -= 0.1,
+            _ => {}
+        }
+        self.speed = na::clamp(self.speed, -2.0, 4.0);
+        self
+    }
+}
+
 struct State {
     image: graphics::Image,
-    pos: na::Point2<f32>,
+    head: Segment,
+    body: VeqDeque<Segment>
     direction: Direction,
-    angle: f32,
-    speed: f32,
     accelerate: Speed,
-    velocity: na::Vector2<f32>
+    desired_length: f32,
+    current_length: f32
 }
 
 fn wrap(a: f32, min: f32, max: f32) -> f32 {
@@ -41,38 +88,35 @@ impl State {
 
         Ok(State {
             image,
-            pos: na::Point2::new(w / 2.0, h / 2.0),
+            head: Segment::new(
+                    na::Point2<f32>::new(w / 2.0, h / 2.0),
+                    0.0, 1.0),
+            body: VecDeque::<Segment>::new(),
             direction: Direction::Straight,
-            angle: 0.0,
-            speed: 1.0,
             accelerate: Speed::Coast,
-            velocity: na::Vector2::new(-1.0, 0.0)
+            desired_length: 100.0,
+            current_length: 0.0
         })
     }
 }
 
 impl ggez::event::EventHandler for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        self.pos += self.velocity;
+        self.body.push_back(self.head);
+        self.current_length += self.head.speed;
+
+        while self.current_length > self.desired_length {
+            let s = self.body.pop_front();
+            self.current_length -= s.speed;
+        }
+
         let (w, h) = graphics::drawable_size(ctx);
-        self.pos.x = wrap(self.pos.x, 0.0, w);
-        self.pos.y = wrap(self.pos.y, 0.0, h);
-
-        match self.direction {
-            Direction::Left => self.angle -= 0.05,
-            Direction::Right => self.angle += 0.05,
-            _ => {},
-        }
-
-        match self.accelerate {
-            Speed::Accelerate => self.speed += 0.1,
-            Speed::Brake => self.speed -= 0.1,
-            _ => {}
-        }
-        self.speed = na::clamp(self.speed, -2.0, 4.0);
-
-        self.velocity = na::Rotation2::new(self.angle)
-                    * na::Vector2::new(-1.0, 0.0) * self.speed;
+        self.head
+            .move()
+            .wrap(na::Vector2<f32>::new(0.0, 0.0),
+                na::Vector2<f32>::new(w, h))
+            .turn(self.direction)
+            .accelerate(self.accelerate)
 
         Ok(())
     }
