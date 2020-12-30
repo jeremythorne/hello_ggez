@@ -1,8 +1,17 @@
-use ggez::{*, graphics, graphics::spritebatch, event, input::keyboard};
+use core::time;
+use ggez::{*, graphics, graphics::spritebatch};
+use ggez::{event, input::keyboard};
 use ggez::nalgebra as na;
 use std::{env, path};
 use rand;
 use std::collections::{VecDeque};
+
+#[derive(PartialEq)]
+enum PlayState {
+    Space,
+    Play,
+    Dead
+}
 
 enum Direction {
     Left,
@@ -86,6 +95,8 @@ impl Fruit {
 }
 
 struct State {
+    play_state: PlayState,
+    space_image: graphics::Image,
     image: graphics::Image,
     fruit_image: graphics::Image,
     head_radius: f32,
@@ -96,7 +107,8 @@ struct State {
     accelerate: Speed,
     desired_length: f32,
     current_length: f32,
-    fruit: Fruit
+    fruit: Fruit,
+    dead_timer: Option<time::Duration>
 }
 
 fn wrap(a: f32, min: f32, max: f32) -> f32 {
@@ -113,12 +125,15 @@ impl State {
     fn new(ctx: &mut Context) -> GameResult<State> {
         let image = graphics::Image::new(ctx, "/train00.png")?;
         let fruit_image = graphics::Image::new(ctx, "/fruit00.png")?;
+        let space_image = graphics::Image::new(ctx, "/space0.png")?;
         let (w, h) = graphics::drawable_size(ctx);
 
         let head_radius = (image.height() as f32) / 2.0;
         let fruit_radius = (fruit_image.height() as f32) / 2.0;
 
         Ok(State {
+            play_state: PlayState::Space,
+            space_image,
             image,
             fruit_image,
             head_radius,
@@ -131,7 +146,8 @@ impl State {
             accelerate: Speed::Coast,
             desired_length: 100.0,
             current_length: 0.0,
-            fruit: Fruit::new(w, h)
+            fruit: Fruit::new(w, h),
+            dead_timer: None
         })
     }
 }
@@ -166,6 +182,28 @@ impl ggez::event::EventHandler for State {
             
         }
 
+        if self.play_state == PlayState::Dead {
+            if (timer::time_since_start(ctx) -
+                    self.dead_timer.unwrap()).as_secs() > 4 {
+                self.play_state = PlayState::Space;
+                self.dead_timer = None;
+            }
+        }
+
+        if self.body
+            .iter()
+            .rev()
+            .enumerate()
+            .any(|(i, s)| i > 100
+                            && collide(&self.head.pos,
+                                         self.head_radius,
+                                         &s.pos,
+                                         self.head_radius / 2.0)) {
+            self.play_state = PlayState::Dead;
+            self.desired_length = 100.0;
+            self.dead_timer = Some(timer::time_since_start(ctx));
+        }
+
         Ok(())
     }
 
@@ -173,17 +211,30 @@ impl ggez::event::EventHandler for State {
                       keycode: keyboard::KeyCode,
                       _keymods: keyboard::KeyMods,
                       _repeat: bool) {
-        match keycode {
-            keyboard::KeyCode::Escape => event::quit(ctx),
-            keyboard::KeyCode::A => self.direction = Direction::Left,
-            keyboard::KeyCode::D => self.direction = Direction::Right,
-            keyboard::KeyCode::W => self.accelerate = Speed::Accelerate,
-            keyboard::KeyCode::S => self.accelerate = Speed::Brake,
-            _ => { 
-                self.direction = Direction::Straight;
-                self.accelerate = Speed::Coast;
-            }
-        };
+        if keycode == keyboard::KeyCode::Escape {
+            event::quit(ctx);
+        }
+
+        match self.play_state {
+            PlayState::Space => {
+                if keycode == keyboard::KeyCode::Space {
+                    self.play_state = PlayState::Play
+                }
+            },
+            PlayState::Play => {
+                match keycode {
+                    keyboard::KeyCode::A => self.direction = Direction::Left,
+                    keyboard::KeyCode::D => self.direction = Direction::Right,
+                    keyboard::KeyCode::W => self.accelerate = Speed::Accelerate,
+                    keyboard::KeyCode::S => self.accelerate = Speed::Brake,
+                    _ => { 
+                        self.direction = Direction::Straight;
+                        self.accelerate = Speed::Coast;
+                    }
+                };
+            },
+            _ => {}
+        }
     }
 
     fn key_up_event(&mut self, _ctx: &mut Context,
@@ -200,35 +251,46 @@ impl ggez::event::EventHandler for State {
         let w = self.image.width();
         let scale = 2.0 / ( w as f32);
 
-        let mut batch = spritebatch::SpriteBatch::new(self.image.clone());
+        if self.play_state != PlayState::Dead {
+            let mut batch = spritebatch::SpriteBatch::new(self.image.clone());
 
-        for s in self.body.iter() {
-            batch.add(    
+            for s in self.body.iter() {
+                batch.add(    
+                    graphics::DrawParam::new()
+                        .src(graphics::Rect::new(0.1, 0.0,
+                                                 s.speed * scale, 1.0))
+                        .offset(na::Point2::new(0.5, 0.5))
+                        .dest(s.pos)
+                        .rotation(s.angle),
+                );
+            }
+
+            batch.add(
                 graphics::DrawParam::new()
-                    .src(graphics::Rect::new(0.1, 0.0,
-                                             s.speed * scale, 1.0))
-                    .offset(na::Point2::new(0.5, 0.5))
-                    .dest(s.pos)
-                    .rotation(s.angle),
+                    .src(graphics::Rect::new(0.0, 0.0, 0.1, 1.0))
+                    .offset(na::Point2::new(1.0, 0.5))
+                    .dest(self.head.pos)
+                    .rotation(self.head.angle),
             );
+
+            graphics::draw(ctx, &batch, graphics::DrawParam::new())?;
         }
-
-        batch.add(
-            graphics::DrawParam::new()
-                .src(graphics::Rect::new(0.0, 0.0, 0.1, 1.0))
-                .offset(na::Point2::new(1.0, 0.5))
-                .dest(self.head.pos)
-                .rotation(self.head.angle),
-        );
-
-        graphics::draw(ctx, &batch, graphics::DrawParam::new())?;
-
         graphics::draw(ctx,
             &self.fruit_image,
             graphics::DrawParam::new()
                 .offset(na::Point2::new(0.5, 0.5))
                 .dest(self.fruit.pos)
         )?;
+
+        if self.play_state == PlayState::Space {
+            let (w, h) = graphics::drawable_size(ctx);
+            graphics::draw(ctx,
+                &self.space_image,
+                graphics::DrawParam::new()
+                    .offset(na::Point2::new(0.5, 0.5))
+                    .dest(na::Point2::new(w / 2.0, h / 2.0))
+            )?;
+        }
 
         graphics::present(ctx)?;
         Ok(())
