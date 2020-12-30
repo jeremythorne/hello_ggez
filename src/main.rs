@@ -27,37 +27,41 @@ impl Segment {
         speed: speed
     }
 
-    fn move() -> &mut Self {
+    fn update(&mut self, screen: (na::Vector2<f32>, max: na::Vector2<f32>),
+              direction: Direction, accel: Speed) {
+        self.move();
+        self.wrap(screen.0, screen.1);
+        self.turn(direction);
+        self.accelerate(accel);
+    }
+
+    fn move() {
         let velocity = na::Rotation2::new(self.angle)
                      * na::Vector2::new(-1.0, 0.0) * self.speed;
 
         self.pos += velocity;
-        self
     }
 
-    fn wrap(min: na::Vector2<f32>, max: na::Vector2<f32>) -> &mut Self {
+    fn wrap(min: na::Vector2<f32>, max: na::Vector2<f32>) {
         self.pos.x = ::wrap(self.pos.x, min.x, max.x);
         self.pos.y = ::wrap(self.pos.y, min.y, max.y);
-        self
     }
 
-    fn turn(direction: Direction) -> &mut Self {
+    fn turn(direction: Direction) {
         match direction {
             Direction::Left => self.angle -= 0.05,
             Direction::Right => self.angle += 0.05,
             _ => {},
         }
-        self
     }
 
-    fn accelerate(accel: Speed) -> &mut Self {
+    fn accelerate(accel: Speed) {
         match accel {
             Speed::Accelerate => self.speed += 0.1,
             Speed::Brake => self.speed -= 0.1,
             _ => {}
         }
         self.speed = na::clamp(self.speed, -2.0, 4.0);
-        self
     }
 }
 
@@ -111,12 +115,10 @@ impl ggez::event::EventHandler for State {
         }
 
         let (w, h) = graphics::drawable_size(ctx);
-        self.head
-            .move()
-            .wrap(na::Vector2<f32>::new(0.0, 0.0),
-                na::Vector2<f32>::new(w, h))
-            .turn(self.direction)
-            .accelerate(self.accelerate)
+        self.head.update((na::Vector2<f32>::new(0.0, 0.0),
+                na::Vector2<f32>::new(w, h)),
+                self.direction,
+                self.accelerate);
 
         Ok(())
     }
