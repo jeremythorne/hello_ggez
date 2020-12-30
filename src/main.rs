@@ -1,4 +1,4 @@
-use ggez::{*, graphics, event, input::keyboard};
+use ggez::{*, graphics, graphics::spritebatch, event, input::keyboard};
 use ggez::nalgebra as na;
 use std::{env, path};
 use rand;
@@ -161,7 +161,9 @@ impl ggez::event::EventHandler for State {
         if collide(&self.head.pos, self.head_radius,
             &self.fruit.pos, self.fruit_radius) {
             self.fruit = Fruit::new(w, h);
-            self.desired_length += 10.0;
+            self.desired_length = na::clamp(
+                self.desired_length + 10.0, 0.0, 10000.0);
+            
         }
 
         Ok(())
@@ -198,17 +200,28 @@ impl ggez::event::EventHandler for State {
         let w = self.image.width();
         let scale = 2.0 / ( w as f32);
 
+        let mut batch = spritebatch::SpriteBatch::new(self.image.clone());
+
         for s in self.body.iter() {
-            graphics::draw(ctx,
-                &self.image,
+            batch.add(    
                 graphics::DrawParam::new()
                     .src(graphics::Rect::new(0.1, 0.0,
                                              s.speed * scale, 1.0))
                     .offset(na::Point2::new(0.5, 0.5))
                     .dest(s.pos)
                     .rotation(s.angle),
-            )?;
+            );
         }
+
+        batch.add(
+            graphics::DrawParam::new()
+                .src(graphics::Rect::new(0.0, 0.0, 0.1, 1.0))
+                .offset(na::Point2::new(1.0, 0.5))
+                .dest(self.head.pos)
+                .rotation(self.head.angle),
+        );
+
+        graphics::draw(ctx, &batch, graphics::DrawParam::new())?;
 
         graphics::draw(ctx,
             &self.fruit_image,
@@ -216,17 +229,6 @@ impl ggez::event::EventHandler for State {
                 .offset(na::Point2::new(0.5, 0.5))
                 .dest(self.fruit.pos)
         )?;
-
-
-        graphics::draw(ctx,
-            &self.image,
-            graphics::DrawParam::new()
-                .src(graphics::Rect::new(0.0, 0.0, 0.1, 1.0))
-                .offset(na::Point2::new(1.0, 0.5))
-                .dest(self.head.pos)
-                .rotation(self.head.angle),
-        )?;
-
 
         graphics::present(ctx)?;
         Ok(())
