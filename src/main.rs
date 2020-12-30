@@ -49,9 +49,13 @@ impl Segment {
         self.accelerate(accel);
     }
 
+    fn heading(&self) -> na::Vector2::<f32> {
+        na::Rotation2::new(self.angle)
+                     * na::Vector2::new(-1.0, 0.0)
+    }
+
     fn translate(&mut self) {
-        let velocity = na::Rotation2::new(self.angle)
-                     * na::Vector2::new(-1.0, 0.0) * self.speed;
+        let velocity = self.heading() * self.speed;
 
         self.pos += velocity;
     }
@@ -128,7 +132,7 @@ impl State {
         let space_image = graphics::Image::new(ctx, "/space0.png")?;
         let (w, h) = graphics::drawable_size(ctx);
 
-        let head_radius = (image.height() as f32) / 2.0;
+        let head_radius = (image.width() as f32) * 0.1 / 2.0;
         let fruit_radius = (fruit_image.height() as f32) / 2.0;
 
         Ok(State {
@@ -174,7 +178,9 @@ impl ggez::event::EventHandler for State {
                 &self.direction,
                 &self.accelerate);
 
-        if collide(&self.head.pos, self.head_radius,
+        let nose = self.head.pos + self.head.heading() * self.head_radius;
+
+        if collide(&nose, self.head_radius,
             &self.fruit.pos, self.fruit_radius) {
             self.fruit = Fruit::new(w, h);
             self.desired_length = na::clamp(
@@ -184,7 +190,7 @@ impl ggez::event::EventHandler for State {
 
         if self.play_state == PlayState::Dead {
             if (timer::time_since_start(ctx) -
-                    self.dead_timer.unwrap()).as_secs() > 4 {
+                    self.dead_timer.unwrap()).as_secs() > 2 {
                 self.play_state = PlayState::Space;
                 self.dead_timer = None;
             }
@@ -195,7 +201,7 @@ impl ggez::event::EventHandler for State {
             .rev()
             .enumerate()
             .any(|(i, s)| i > 100
-                            && collide(&self.head.pos,
+                            && collide(&nose,
                                          self.head_radius,
                                          &s.pos,
                                          self.head_radius / 2.0)) {
