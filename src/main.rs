@@ -1,6 +1,8 @@
 use ggez::{*, graphics, event, input::keyboard};
 use ggez::nalgebra as na;
-use std::{env, path, VecDeque};
+use std::{env, path};
+use rand;
+use std::collections::{VecDeque};
 
 enum Direction {
     Left,
@@ -14,6 +16,7 @@ enum Speed {
     Coast
 }
 
+#[derive(Clone)]
 struct Segment {
     pos: na::Point2<f32>,
     angle: f32,
@@ -22,57 +25,78 @@ struct Segment {
 
 impl Segment {
     fn new(pos: na::Point2<f32>, angle: f32, speed: f32) -> Segment {
-        pos: pos,
-        angle: angle,
-        speed: speed
+        Segment {
+            pos: pos,
+            angle: angle,
+            speed: speed
+        }
     }
 
-    fn update(&mut self, screen: (na::Vector2<f32>, max: na::Vector2<f32>),
-              direction: Direction, accel: Speed) {
-        self.move();
+    fn update(&mut self, screen: (na::Vector2<f32>, na::Vector2<f32>),
+              direction: &Direction, accel: &Speed) {
+        self.translate();
         self.wrap(screen.0, screen.1);
         self.turn(direction);
         self.accelerate(accel);
     }
 
-    fn move() {
+    fn translate(&mut self) {
         let velocity = na::Rotation2::new(self.angle)
                      * na::Vector2::new(-1.0, 0.0) * self.speed;
 
         self.pos += velocity;
     }
 
-    fn wrap(min: na::Vector2<f32>, max: na::Vector2<f32>) {
-        self.pos.x = ::wrap(self.pos.x, min.x, max.x);
-        self.pos.y = ::wrap(self.pos.y, min.y, max.y);
+    fn wrap(&mut self, min: na::Vector2<f32>, max: na::Vector2<f32>) {
+        self.pos.x = wrap(self.pos.x, min.x, max.x);
+        self.pos.y = wrap(self.pos.y, min.y, max.y);
     }
 
-    fn turn(direction: Direction) {
+    fn turn(&mut self, direction: &Direction) {
         match direction {
-            Direction::Left => self.angle -= 0.05,
-            Direction::Right => self.angle += 0.05,
+            Direction::Left => self.angle -= 0.01 * self.speed,
+            Direction::Right => self.angle += 0.01 * self.speed,
             _ => {},
         }
     }
 
-    fn accelerate(accel: Speed) {
+    fn accelerate(&mut self, accel: &Speed) {
         match accel {
             Speed::Accelerate => self.speed += 0.1,
             Speed::Brake => self.speed -= 0.1,
             _ => {}
         }
-        self.speed = na::clamp(self.speed, -2.0, 4.0);
+        self.speed = na::clamp(self.speed, 0.0, 4.0);
+    }
+}
+
+struct Fruit {
+    pos: na::Point2<f32>
+}
+
+impl Fruit {
+    fn new(w: f32, h: f32) -> Fruit {
+        Fruit {
+            pos: na::Point2::new(
+                     rand::random::<f32>() * w,
+                     rand::random::<f32>() * h
+                     )
+        }
     }
 }
 
 struct State {
     image: graphics::Image,
+    fruit_image: graphics::Image,
+    head_radius: f32,
+    fruit_radius: f32,
     head: Segment,
-    body: VeqDeque<Segment>
+    body: VecDeque<Segment>,
     direction: Direction,
     accelerate: Speed,
     desired_length: f32,
-    current_length: f32
+    current_length: f32,
+    fruit: Fruit
 }
 
 fn wrap(a: f32, min: f32, max: f32) -> f32 {
@@ -88,37 +112,57 @@ fn wrap(a: f32, min: f32, max: f32) -> f32 {
 impl State {
     fn new(ctx: &mut Context) -> GameResult<State> {
         let image = graphics::Image::new(ctx, "/train00.png")?;
+        let fruit_image = graphics::Image::new(ctx, "/fruit00.png")?;
         let (w, h) = graphics::drawable_size(ctx);
+
+        let head_radius = (image.height() as f32) / 2.0;
+        let fruit_radius = (fruit_image.height() as f32) / 2.0;
 
         Ok(State {
             image,
+            fruit_image,
+            head_radius,
+            fruit_radius,
             head: Segment::new(
-                    na::Point2<f32>::new(w / 2.0, h / 2.0),
+                    na::Point2::<f32>::new(w / 2.0, h / 2.0),
                     0.0, 1.0),
             body: VecDeque::<Segment>::new(),
             direction: Direction::Straight,
             accelerate: Speed::Coast,
             desired_length: 100.0,
-            current_length: 0.0
+            current_length: 0.0,
+            fruit: Fruit::new(w, h)
         })
     }
 }
 
+fn collide(a: &na::Point2<f32>, ra: f32, b: &na::Point2<f32>, rb: f32) -> bool {
+    let d = ra + rb;
+    na::distance_squared(a, b) < d * d
+}
+
 impl ggez::event::EventHandler for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        self.body.push_back(self.head);
+        self.body.push_back(self.head.clone());
         self.current_length += self.head.speed;
 
         while self.current_length > self.desired_length {
-            let s = self.body.pop_front();
-            self.current_length -= s.speed;
+            if let Some(s) = self.body.pop_front() {
+                self.current_length -= s.speed;
+            }
         }
 
         let (w, h) = graphics::drawable_size(ctx);
-        self.head.update((na::Vector2<f32>::new(0.0, 0.0),
-                na::Vector2<f32>::new(w, h)),
-                self.direction,
-                self.accelerate);
+        self.head.update((na::Vector2::<f32>::new(0.0, 0.0),
+                na::Vector2::<f32>::new(w, h)),
+                &self.direction,
+                &self.accelerate);
+
+        if collide(&self.head.pos, self.head_radius,
+            &self.fruit.pos, self.fruit_radius) {
+            self.fruit = Fruit::new(w, h);
+            self.desired_length += 10.0;
+        }
 
         Ok(())
     }
@@ -151,14 +195,38 @@ impl ggez::event::EventHandler for State {
         
         graphics::clear(ctx, (0.1, 0.2, 0.3, 1.0).into());
 
+        let w = self.image.width();
+        let scale = 2.0 / ( w as f32);
+
+        for s in self.body.iter() {
+            graphics::draw(ctx,
+                &self.image,
+                graphics::DrawParam::new()
+                    .src(graphics::Rect::new(0.1, 0.0,
+                                             s.speed * scale, 1.0))
+                    .offset(na::Point2::new(0.5, 0.5))
+                    .dest(s.pos)
+                    .rotation(s.angle),
+            )?;
+        }
+
+        graphics::draw(ctx,
+            &self.fruit_image,
+            graphics::DrawParam::new()
+                .offset(na::Point2::new(0.5, 0.5))
+                .dest(self.fruit.pos)
+        )?;
+
+
         graphics::draw(ctx,
             &self.image,
             graphics::DrawParam::new()
-                .src(graphics::Rect::new(0.0, 0.0, 0.2, 1.0))
-                .offset(na::Point2::new(0.7, 0.5)) // turn on back wheels
-                .dest(self.pos)
-                .rotation(self.angle),
+                .src(graphics::Rect::new(0.0, 0.0, 0.1, 1.0))
+                .offset(na::Point2::new(1.0, 0.5))
+                .dest(self.head.pos)
+                .rotation(self.head.angle),
         )?;
+
 
         graphics::present(ctx)?;
         Ok(())
