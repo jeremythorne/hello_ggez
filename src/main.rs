@@ -120,7 +120,7 @@ impl Explosion {
 
         let mut pops = Vec::<Pop>::new();
         for s in segments {
-            if rand::random::<i32>() % 10 < 3 {
+            if rand::random::<i32>() % 10 < 1 {
                 pops.push(
                     Pop {
                         pos: na::Point2::new(
@@ -251,8 +251,8 @@ impl Snake {
     }
 
     fn increase_length(&mut self, length: f32) {
-        self.desired_length = na::clamp(
-            self.desired_length + length, 0.0, 10000.0);
+        self.desired_length = na::clamp(self.desired_length + length,
+                                        0.0, 10000.0);
     }
     
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
@@ -261,15 +261,18 @@ impl Snake {
         let w = self.image.width();
         let scale = 2.0 / ( w as f32);
 
+        let mut f = 0.0;
         for s in self.body.iter() {
+            let sw = s.speed * scale;
+            let off = 1.0 - (f + sw).rem_euclid(0.9);
             batch.add(    
                 graphics::DrawParam::new()
-                    .src(graphics::Rect::new(0.1, 0.0,
-                                             s.speed * scale, 1.0))
+                    .src(graphics::Rect::new(off, 0.0, sw, 1.0))
                     .offset(na::Point2::new(0.5, 0.5))
                     .dest(s.pos)
-                    .rotation(s.angle),
+                    .rotation(s.angle)
             );
+            f += sw;
         }
 
         batch.add(
@@ -349,7 +352,8 @@ impl ggez::event::EventHandler for State {
            }
         }
 
-        if self.snake.collide_self() {
+        if self.play_state == PlayState::Play &&
+                self.snake.collide_self() {
             self.play_state = PlayState::Dead;
             self.dead_timer = Some(timer::time_since_start(ctx));
             if let Some(segments) = self.snake.segments() {
