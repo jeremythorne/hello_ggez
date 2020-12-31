@@ -98,6 +98,80 @@ impl Fruit {
     }
 }
 
+struct Pop {
+    pos: na::Point2<f32>
+    delay: i32
+}
+
+struct Explosion {
+    images: Vec<graphics::Image>,
+    pops: Vec<Pop>
+    step: i32
+}
+
+impl Explosion {
+    fn new(segments: std::slice::Iter<Segment>, 
+           ctx: &mut Context) -> Explosion {
+        let images = Vec::<graphics::Image>::new();
+        for i in 0..7 {
+            let s = format!("./pop0{}.png", i);
+            images.push(graphics::Image::new(ctx, s)?;
+        }
+
+        let pops = Vec::<Pop>::new();
+        for s in segments {
+            if rand::random::<i32>() % 10 < 3 {
+                pops.push(
+                    Pop {
+                        pos: na::Point2::new(
+                                s.pos.x + 20.0 * (
+                                     random::rand::<f32>() - 0.5),
+                                s.pos.y + 20.0 * (
+                                     random::rand::<f32>() - 0.5),
+                                 ),
+                        delay: rand::random::<i32>() % 60;
+                    }
+                    );
+            }
+        }
+
+        Explosion {
+            images,
+            pops,
+            step: 0
+        }
+    }
+
+    fn update(&mut self, _ctx: &mut Context) -> GameResult {
+        self.step += 1
+        Ok(())
+    }
+
+    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        let batches = Vec::<graphics::spritebatch::SpriteBatch>::new();
+        for image in self.images {
+            batches.push(spritebatch::SpriteBatch::new(image.clone());
+        }
+
+        for pop in self.pops {
+            let frame = (self.step - pop.delay) * batches.len() / 60;
+            if frame >= 0 && frame < batches.len() {
+                batches[frame].unwrap().add(
+                    graphics::DrawParam::new()
+                    .offset(na::Point2::new(0.5, 0.5))
+                    .dest(pop.pos)
+                );
+            }
+        }
+
+        for batch in batches {
+            graphics::draw(ctx, &batch, graphics::DrawParam::new())?;
+        }
+
+        Ok(())
+    }
+}
+
 struct State {
     play_state: PlayState,
     space_image: graphics::Image,
