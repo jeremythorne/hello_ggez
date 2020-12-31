@@ -99,64 +99,66 @@ impl Fruit {
 }
 
 struct Pop {
-    pos: na::Point2<f32>
+    pos: na::Point2<f32>,
     delay: i32
 }
 
 struct Explosion {
     images: Vec<graphics::Image>,
-    pops: Vec<Pop>
+    pops: Vec<Pop>,
     step: i32
 }
 
 impl Explosion {
     fn new(segments: std::slice::Iter<Segment>, 
-           ctx: &mut Context) -> Explosion {
-        let images = Vec::<graphics::Image>::new();
+           ctx: &mut Context) -> GameResult<Explosion> {
+        let mut images = Vec::<graphics::Image>::new();
         for i in 0..7 {
-            let s = format!("./pop0{}.png", i);
-            images.push(graphics::Image::new(ctx, s)?;
+            let s = format!("/pop0{}.png", i);
+            images.push(graphics::Image::new(ctx, s)?);
         }
 
-        let pops = Vec::<Pop>::new();
+        let mut pops = Vec::<Pop>::new();
         for s in segments {
             if rand::random::<i32>() % 10 < 3 {
                 pops.push(
                     Pop {
                         pos: na::Point2::new(
                                 s.pos.x + 20.0 * (
-                                     random::rand::<f32>() - 0.5),
+                                     rand::random::<f32>() - 0.5),
                                 s.pos.y + 20.0 * (
-                                     random::rand::<f32>() - 0.5),
+                                     rand::random::<f32>() - 0.5),
                                  ),
-                        delay: rand::random::<i32>() % 60;
+                        delay: rand::random::<i32>() % 60
                     }
                     );
             }
         }
 
-        Explosion {
+        Ok(Explosion {
             images,
             pops,
             step: 0
-        }
+        })
     }
 
     fn update(&mut self, _ctx: &mut Context) -> GameResult {
-        self.step += 1
+        self.step += 1;
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        let batches = Vec::<graphics::spritebatch::SpriteBatch>::new();
-        for image in self.images {
-            batches.push(spritebatch::SpriteBatch::new(image.clone());
+        let mut batches = Vec::<graphics::spritebatch::SpriteBatch>::new();
+        for image in self.images.iter() {
+            batches.push(spritebatch::SpriteBatch::new(image.clone()));
         }
 
-        for pop in self.pops {
-            let frame = (self.step - pop.delay) * batches.len() / 60;
-            if frame >= 0 && frame < batches.len() {
-                batches[frame].unwrap().add(
+        let n = batches.len() as i32;
+
+        for pop in self.pops.iter() {
+            let frame = (self.step - pop.delay) * n / 60;
+            if frame >= 0 && frame < n {
+                batches[frame as usize].add(
                     graphics::DrawParam::new()
                     .offset(na::Point2::new(0.5, 0.5))
                     .dest(pop.pos)
@@ -164,29 +166,136 @@ impl Explosion {
             }
         }
 
-        for batch in batches {
-            graphics::draw(ctx, &batch, graphics::DrawParam::new())?;
+        for batch in batches.iter() {
+            graphics::draw(ctx, batch, graphics::DrawParam::new())?;
         }
 
         Ok(())
     }
 }
 
+struct Snake {
+    image: graphics::Image,
+    nose: na::Point2<f32>,
+    head_radius: f32,
+    head: Segment,
+    body: VecDeque<Segment>,
+    desired_length: f32,
+    current_length: f32,
+}
+
+impl Snake {
+    fn new(ctx: &mut Context) -> GameResult<Snake> {
+        let image = graphics::Image::new(ctx, "/train00.png")?;
+        let (w, h) = graphics::drawable_size(ctx);
+
+        let head_radius = (image.width() as f32) * 0.1 / 2.0;
+
+        Ok(Snake {
+            image,
+            nose: na::Point2::<f32>::new(0.0, 0.0),
+            head_radius,
+            head: Segment::new(
+                    na::Point2::<f32>::new(w / 2.0, h / 2.0),
+                    0.0, 1.0),
+            body: VecDeque::<Segment>::new(),
+            desired_length: 100.0,
+            current_length: 0.0,
+        })
+    }
+
+    fn collide(&self, b: &na::Point2<f32>, rb: f32) -> bool {
+        collide(&self.nose, self.head_radius, b, rb)
+    }
+
+    fn collide_self(&self) -> bool {
+        self.body
+            .iter()
+            .rev()
+            .enumerate()
+            .any(|(i, s)| i > 100
+                        && collide(&self.nose,
+                                     self.head_radius,
+                                     &s.pos,
+                                     self.head_radius / 2.0))
+    }
+
+    fn segments(&mut self) -> Option<std::slice::Iter<Segment>> {
+        self.body.make_contiguous();
+        if let (slice, &[]) = self.body.as_slices() {
+            Some(slice.iter())
+        } else {
+            None
+        }
+    }
+
+    fn update(&mut self, screen:(f32, f32),
+              direction: &Direction,
+              accelerate: &Speed) {
+        self.body.push_back(self.head.clone());
+        self.current_length += self.head.speed;
+
+        while self.current_length > self.desired_length {
+            if let Some(s) = self.body.pop_front() {
+                self.current_length -= s.speed;
+            }
+        }
+
+        let (w, h) = screen;
+        self.head.update((na::Vector2::<f32>::new(0.0, 0.0),
+                na::Vector2::<f32>::new(w, h)),
+                &direction,
+                &accelerate);
+
+        self.nose = self.head.pos + self.head.heading() * self.head_radius;
+    }
+
+    fn increase_length(&mut self, length: f32) {
+        self.desired_length = na::clamp(
+            self.desired_length + length, 0.0, 10000.0);
+    }
+    
+    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        let mut batch = spritebatch::SpriteBatch::new(self.image.clone());
+
+        let w = self.image.width();
+        let scale = 2.0 / ( w as f32);
+
+        for s in self.body.iter() {
+            batch.add(    
+                graphics::DrawParam::new()
+                    .src(graphics::Rect::new(0.1, 0.0,
+                                             s.speed * scale, 1.0))
+                    .offset(na::Point2::new(0.5, 0.5))
+                    .dest(s.pos)
+                    .rotation(s.angle),
+            );
+        }
+
+        batch.add(
+            graphics::DrawParam::new()
+                .src(graphics::Rect::new(0.0, 0.0, 0.1, 1.0))
+                .offset(na::Point2::new(1.0, 0.5))
+                .dest(self.head.pos)
+                .rotation(self.head.angle),
+        );
+
+        graphics::draw(ctx, &batch, graphics::DrawParam::new())?;
+        Ok(())
+    } 
+}
+
 struct State {
     play_state: PlayState,
     space_image: graphics::Image,
-    image: graphics::Image,
     fruit_image: graphics::Image,
-    head_radius: f32,
     fruit_radius: f32,
-    head: Segment,
-    body: VecDeque<Segment>,
+    snake: Snake,
     direction: Direction,
     accelerate: Speed,
-    desired_length: f32,
-    current_length: f32,
     fruit: Fruit,
-    dead_timer: Option<time::Duration>
+    dead_timer: Option<time::Duration>,
+    explosion: Option<Explosion>
 }
 
 fn wrap(a: f32, min: f32, max: f32) -> f32 {
@@ -201,31 +310,23 @@ fn wrap(a: f32, min: f32, max: f32) -> f32 {
 
 impl State {
     fn new(ctx: &mut Context) -> GameResult<State> {
-        let image = graphics::Image::new(ctx, "/train00.png")?;
         let fruit_image = graphics::Image::new(ctx, "/fruit00.png")?;
         let space_image = graphics::Image::new(ctx, "/space0.png")?;
         let (w, h) = graphics::drawable_size(ctx);
 
-        let head_radius = (image.width() as f32) * 0.1 / 2.0;
         let fruit_radius = (fruit_image.height() as f32) / 2.0;
 
         Ok(State {
             play_state: PlayState::Space,
             space_image,
-            image,
             fruit_image,
-            head_radius,
             fruit_radius,
-            head: Segment::new(
-                    na::Point2::<f32>::new(w / 2.0, h / 2.0),
-                    0.0, 1.0),
-            body: VecDeque::<Segment>::new(),
+            snake: Snake::new(ctx)?,
             direction: Direction::Straight,
             accelerate: Speed::Coast,
-            desired_length: 100.0,
-            current_length: 0.0,
             fruit: Fruit::new(w, h),
-            dead_timer: None
+            dead_timer: None,
+            explosion: None
         })
     }
 }
@@ -237,29 +338,23 @@ fn collide(a: &na::Point2<f32>, ra: f32, b: &na::Point2<f32>, rb: f32) -> bool {
 
 impl ggez::event::EventHandler for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        self.body.push_back(self.head.clone());
-        self.current_length += self.head.speed;
-
-        while self.current_length > self.desired_length {
-            if let Some(s) = self.body.pop_front() {
-                self.current_length -= s.speed;
-            }
-        }
 
         let (w, h) = graphics::drawable_size(ctx);
-        self.head.update((na::Vector2::<f32>::new(0.0, 0.0),
-                na::Vector2::<f32>::new(w, h)),
-                &self.direction,
-                &self.accelerate);
+        self.snake.update((w, h), &self.direction, &self.accelerate);
 
-        let nose = self.head.pos + self.head.heading() * self.head_radius;
-
-        if collide(&nose, self.head_radius,
-            &self.fruit.pos, self.fruit_radius) {
+        if self.snake.collide(&self.fruit.pos, self.fruit_radius) {
             self.fruit = Fruit::new(w, h);
-            self.desired_length = na::clamp(
-                self.desired_length + 10.0, 0.0, 10000.0);
-            
+            if self.play_state == PlayState::Play {
+                self.snake.increase_length(100.0);
+           }
+        }
+
+        if self.snake.collide_self() {
+            self.play_state = PlayState::Dead;
+            self.dead_timer = Some(timer::time_since_start(ctx));
+            if let Some(segments) = self.snake.segments() {
+                self.explosion = Some(Explosion::new(segments, ctx)?);
+            }
         }
 
         if self.play_state == PlayState::Dead {
@@ -267,21 +362,13 @@ impl ggez::event::EventHandler for State {
                     self.dead_timer.unwrap()).as_secs() > 2 {
                 self.play_state = PlayState::Space;
                 self.dead_timer = None;
+                self.explosion = None;
+                self.snake = Snake::new(ctx)?;
             }
         }
 
-        if self.body
-            .iter()
-            .rev()
-            .enumerate()
-            .any(|(i, s)| i > 100
-                            && collide(&nose,
-                                         self.head_radius,
-                                         &s.pos,
-                                         self.head_radius / 2.0)) {
-            self.play_state = PlayState::Dead;
-            self.desired_length = 100.0;
-            self.dead_timer = Some(timer::time_since_start(ctx));
+        if let Some(explosion) = &mut self.explosion {
+            explosion.update(ctx)?;
         }
 
         Ok(())
@@ -328,33 +415,14 @@ impl ggez::event::EventHandler for State {
         
         graphics::clear(ctx, (0.1, 0.2, 0.3, 1.0).into());
 
-        let w = self.image.width();
-        let scale = 2.0 / ( w as f32);
-
         if self.play_state != PlayState::Dead {
-            let mut batch = spritebatch::SpriteBatch::new(self.image.clone());
-
-            for s in self.body.iter() {
-                batch.add(    
-                    graphics::DrawParam::new()
-                        .src(graphics::Rect::new(0.1, 0.0,
-                                                 s.speed * scale, 1.0))
-                        .offset(na::Point2::new(0.5, 0.5))
-                        .dest(s.pos)
-                        .rotation(s.angle),
-                );
-            }
-
-            batch.add(
-                graphics::DrawParam::new()
-                    .src(graphics::Rect::new(0.0, 0.0, 0.1, 1.0))
-                    .offset(na::Point2::new(1.0, 0.5))
-                    .dest(self.head.pos)
-                    .rotation(self.head.angle),
-            );
-
-            graphics::draw(ctx, &batch, graphics::DrawParam::new())?;
+            self.snake.draw(ctx)?;
         }
+
+        if let Some(explosion) = &mut self.explosion {
+            explosion.draw(ctx)?;
+        }
+
         graphics::draw(ctx,
             &self.fruit_image,
             graphics::DrawParam::new()
