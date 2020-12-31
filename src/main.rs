@@ -84,7 +84,8 @@ impl Segment {
 }
 
 struct Fruit {
-    pos: na::Point2<f32>
+    pos: na::Point2<f32>,
+    n: usize
 }
 
 impl Fruit {
@@ -93,7 +94,8 @@ impl Fruit {
             pos: na::Point2::new(
                      rand::random::<f32>() * w,
                      rand::random::<f32>() * h
-                     )
+                     ),
+            n: (rand::random::<u8>() % 5) as usize
         }
     }
 }
@@ -291,7 +293,7 @@ impl Snake {
 struct State {
     play_state: PlayState,
     space_image: graphics::Image,
-    fruit_image: graphics::Image,
+    fruit_images: Vec<graphics::Image>,
     fruit_radius: f32,
     snake: Snake,
     direction: Direction,
@@ -313,16 +315,20 @@ fn wrap(a: f32, min: f32, max: f32) -> f32 {
 
 impl State {
     fn new(ctx: &mut Context) -> GameResult<State> {
-        let fruit_image = graphics::Image::new(ctx, "/fruit00.png")?;
+        let mut fruit_images = Vec::<graphics::Image>::new();
+        for i in 0..=4 {
+            let s = format!("/fruit{}0.png", i);
+            fruit_images.push(graphics::Image::new(ctx, s)?);
+        }
         let space_image = graphics::Image::new(ctx, "/space0.png")?;
         let (w, h) = graphics::drawable_size(ctx);
 
-        let fruit_radius = (fruit_image.height() as f32) / 2.0;
+        let fruit_radius = (fruit_images[0].height() as f32) / 2.0;
 
         Ok(State {
             play_state: PlayState::Space,
             space_image,
-            fruit_image,
+            fruit_images,
             fruit_radius,
             snake: Snake::new(ctx)?,
             direction: Direction::Straight,
@@ -428,7 +434,7 @@ impl ggez::event::EventHandler for State {
         }
 
         graphics::draw(ctx,
-            &self.fruit_image,
+            &self.fruit_images[self.fruit.n],
             graphics::DrawParam::new()
                 .offset(na::Point2::new(0.5, 0.5))
                 .dest(self.fruit.pos)
