@@ -290,11 +290,49 @@ impl Snake {
     } 
 }
 
+struct Score {
+    images: Vec<graphics::Image>,
+    score: i32
+}
+
+impl Score {
+    fn new(ctx: &mut Context) -> GameResult<Score> {
+        let mut images = Vec::<graphics::Image>::new();
+        for i in 0..=9 {
+            let s = format!("/digit0{}.png", i);
+            images.push(graphics::Image::new(ctx, s)?);
+        }
+        Ok(Score {
+            images,
+            score: 0
+        })
+     }
+    
+    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        let mut s = self.score;
+        let dw = self.images[0].width() as f32;
+        let (w, _h) = graphics::drawable_size(ctx);
+        let mut x = w - dw - 20.0;
+        while s > 0 {
+            let digit = (s % 10) as usize;
+            graphics::draw(ctx,
+                &self.images[digit],
+                graphics::DrawParam::new()
+                    .dest(na::Point2::new(x, 20.0))
+                    )?;
+             s = s / 10;
+             x -= dw;
+        }
+        Ok(())
+    }
+}
+
 struct State {
     play_state: PlayState,
     space_image: graphics::Image,
     fruit_images: Vec<graphics::Image>,
     fruit_radius: f32,
+    score: Score,
     snake: Snake,
     direction: Direction,
     accelerate: Speed,
@@ -330,6 +368,7 @@ impl State {
             space_image,
             fruit_images,
             fruit_radius,
+            score: Score::new(ctx)?,
             snake: Snake::new(ctx)?,
             direction: Direction::Straight,
             accelerate: Speed::Coast,
@@ -355,6 +394,7 @@ impl ggez::event::EventHandler for State {
             self.fruit = Fruit::new(w, h);
             if self.play_state == PlayState::Play {
                 self.snake.increase_length(100.0);
+                self.score.score += 10;
            }
         }
 
@@ -373,6 +413,7 @@ impl ggez::event::EventHandler for State {
                 self.play_state = PlayState::Space;
                 self.dead_timer = None;
                 self.explosion = None;
+                self.score.score = 0;
                 self.snake = Snake::new(ctx)?;
             }
         }
@@ -449,6 +490,8 @@ impl ggez::event::EventHandler for State {
                     .dest(na::Point2::new(w / 2.0, h / 2.0))
             )?;
         }
+
+        self.score.draw(ctx)?;
 
         graphics::present(ctx)?;
         Ok(())
