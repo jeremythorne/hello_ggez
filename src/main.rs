@@ -129,7 +129,7 @@ impl Explosion {
                                 s.pos.y + 20.0 * (
                                      rand::random::<f32>() - 0.5),
                                  ),
-                        delay: rand::random::<i32>() % 60
+                        delay: (rand::random::<u32>() % 60) as i32
                     }
                     );
             }
