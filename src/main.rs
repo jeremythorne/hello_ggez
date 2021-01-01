@@ -4,7 +4,7 @@ use ggez::{event, input::keyboard};
 use ggez::nalgebra as na;
 use std::{env, path};
 use rand;
-use std::collections::{VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 #[derive(PartialEq)]
 enum PlayState {
@@ -30,6 +30,32 @@ struct Segment {
     pos: na::Point2<f32>,
     angle: f32,
     speed: f32
+}
+
+struct ImageCache {
+    hashmap: HashMap<String, graphics::Image>
+}
+
+impl ImageCache {
+    fn new() -> ImageCache {
+        ImageCache {
+            hashmap: HashMap::<String, graphics::Image>::new()
+        }
+    }
+    
+    fn load(&mut self,
+            ctx: &mut Context, path: &str) -> GameResult<graphics::Image> {
+        match self.hashmap.get(path) {
+            Some(image) => {
+                Ok(image.clone())
+            }
+            None => {
+                let image = graphics::Image::new(ctx, path)?;
+                self.hashmap.insert(path.to_string(), image.clone());
+                Ok(image)
+            }
+        }
+    }
 }
 
 impl Segment {
@@ -84,19 +110,44 @@ impl Segment {
 }
 
 struct Fruit {
+    images: Vec<graphics::Image>,
     pos: na::Point2<f32>,
+    radius: f32,
     n: usize
 }
 
 impl Fruit {
-    fn new(w: f32, h: f32) -> Fruit {
-        Fruit {
+    fn new(
+        image_cache: &mut ImageCache,
+        ctx: &mut Context,
+        w: f32, h: f32) -> GameResult<Fruit> {
+        let mut images = Vec::<graphics::Image>::new();
+        for i in 0..=4 {
+            let s = format!("/fruit{}0.png", i);
+            images.push(image_cache.load(ctx, &s)?);
+        }
+        
+        let radius = (images[0].height() as f32) / 2.0;
+ 
+        Ok(Fruit {
+            images,
             pos: na::Point2::new(
                      rand::random::<f32>() * w,
                      rand::random::<f32>() * h
                      ),
+            radius,
             n: (rand::random::<u8>() % 5) as usize
-        }
+        })
+    }
+    
+    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        graphics::draw(ctx,
+            &self.images[self.n],
+            graphics::DrawParam::new()
+                .offset(na::Point2::new(0.5, 0.5))
+                .dest(self.pos)
+        )?;
+        Ok(())
     }
 }
 
@@ -112,12 +163,13 @@ struct Explosion {
 }
 
 impl Explosion {
-    fn new(segments: std::slice::Iter<Segment>, 
+    fn new(segments: std::slice::Iter<Segment>,
+           image_cache: &mut ImageCache,
            ctx: &mut Context) -> GameResult<Explosion> {
         let mut images = Vec::<graphics::Image>::new();
         for i in 0..7 {
             let s = format!("/pop0{}.png", i);
-            images.push(graphics::Image::new(ctx, s)?);
+            images.push(image_cache.load(ctx, &s)?);
         }
 
         let mut pops = Vec::<Pop>::new();
@@ -187,8 +239,10 @@ struct Snake {
 }
 
 impl Snake {
-    fn new(ctx: &mut Context) -> GameResult<Snake> {
-        let image = graphics::Image::new(ctx, "/train00.png")?;
+    fn new(
+        image_cache: &mut ImageCache,
+        ctx: &mut Context) -> GameResult<Snake> {
+        let image = image_cache.load(ctx, "/train00.png")?;
         let (w, h) = graphics::drawable_size(ctx);
 
         let head_radius = (image.width() as f32) * 0.1 / 2.0;
@@ -296,11 +350,13 @@ struct Score {
 }
 
 impl Score {
-    fn new(ctx: &mut Context) -> GameResult<Score> {
+    fn new(
+        image_cache: &mut ImageCache,
+        ctx: &mut Context) -> GameResult<Score> {
         let mut images = Vec::<graphics::Image>::new();
         for i in 0..=9 {
             let s = format!("/digit0{}.png", i);
-            images.push(graphics::Image::new(ctx, s)?);
+            images.push(image_cache.load(ctx, &s)?);
         }
         Ok(Score {
             images,
@@ -329,9 +385,8 @@ impl Score {
 
 struct State {
     play_state: PlayState,
+    image_cache: ImageCache,
     space_image: graphics::Image,
-    fruit_images: Vec<graphics::Image>,
-    fruit_radius: f32,
     score: Score,
     snake: Snake,
     direction: Direction,
@@ -353,26 +408,23 @@ fn wrap(a: f32, min: f32, max: f32) -> f32 {
 
 impl State {
     fn new(ctx: &mut Context) -> GameResult<State> {
-        let mut fruit_images = Vec::<graphics::Image>::new();
-        for i in 0..=4 {
-            let s = format!("/fruit{}0.png", i);
-            fruit_images.push(graphics::Image::new(ctx, s)?);
-        }
-        let space_image = graphics::Image::new(ctx, "/space0.png")?;
+        let mut image_cache = ImageCache::new();
+        let space_image = image_cache.load(ctx, "/space0.png")?;
         let (w, h) = graphics::drawable_size(ctx);
 
-        let fruit_radius = (fruit_images[0].height() as f32) / 2.0;
+        let score = Score::new(&mut image_cache, ctx)?;
+        let snake = Snake::new(&mut image_cache, ctx)?;
+        let fruit = Fruit::new(&mut image_cache, ctx, w, h)?;
 
         Ok(State {
             play_state: PlayState::Space,
+            image_cache,
             space_image,
-            fruit_images,
-            fruit_radius,
-            score: Score::new(ctx)?,
-            snake: Snake::new(ctx)?,
+            score,
+            snake,
             direction: Direction::Straight,
             accelerate: Speed::Coast,
-            fruit: Fruit::new(w, h),
+            fruit,
             dead_timer: None,
             explosion: None
         })
@@ -390,8 +442,8 @@ impl ggez::event::EventHandler for State {
         let (w, h) = graphics::drawable_size(ctx);
         self.snake.update((w, h), &self.direction, &self.accelerate);
 
-        if self.snake.collide(&self.fruit.pos, self.fruit_radius) {
-            self.fruit = Fruit::new(w, h);
+        if self.snake.collide(&self.fruit.pos, self.fruit.radius) {
+            self.fruit = Fruit::new(&mut self.image_cache, ctx, w, h)?;
             if self.play_state == PlayState::Play {
                 self.snake.increase_length(100.0);
                 self.score.score += 10;
@@ -403,7 +455,9 @@ impl ggez::event::EventHandler for State {
             self.play_state = PlayState::Dead;
             self.dead_timer = Some(timer::time_since_start(ctx));
             if let Some(segments) = self.snake.segments() {
-                self.explosion = Some(Explosion::new(segments, ctx)?);
+                self.explosion = Some(
+                    Explosion::new(segments, 
+                                   &mut self.image_cache, ctx)?);
             }
         }
 
@@ -414,7 +468,7 @@ impl ggez::event::EventHandler for State {
                 self.dead_timer = None;
                 self.explosion = None;
                 self.score.score = 0;
-                self.snake = Snake::new(ctx)?;
+                self.snake = Snake::new(&mut self.image_cache, ctx)?;
             }
         }
 
@@ -474,12 +528,7 @@ impl ggez::event::EventHandler for State {
             explosion.draw(ctx)?;
         }
 
-        graphics::draw(ctx,
-            &self.fruit_images[self.fruit.n],
-            graphics::DrawParam::new()
-                .offset(na::Point2::new(0.5, 0.5))
-                .dest(self.fruit.pos)
-        )?;
+        self.fruit.draw(ctx)?;
 
         if self.play_state == PlayState::Space {
             let (w, h) = graphics::drawable_size(ctx);
