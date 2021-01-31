@@ -25,13 +25,6 @@ enum Speed {
     Coast
 }
 
-#[derive(Clone)]
-struct Segment {
-    pos: na::Point2<f32>,
-    angle: f32,
-    speed: f32
-}
-
 struct ImageCache {
     hashmap: HashMap<String, graphics::Image>
 }
@@ -56,6 +49,13 @@ impl ImageCache {
             }
         }
     }
+}
+
+#[derive(Clone)]
+struct Segment {
+    pos: na::Point2<f32>,
+    angle: f32,
+    speed: f32
 }
 
 impl Segment {
